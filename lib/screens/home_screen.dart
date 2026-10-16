@@ -5,7 +5,6 @@ import '../services/puter_ai_service.dart';
 import '../widgets/image_preview_card.dart';
 import 'result_screen.dart';
 
-/// الشاشة الرئيسية: التقاط صورة أو اختيارها من المعرض.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -16,6 +15,10 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
   final PuterAiService _aiService = PuterAiService();
+
+  /// ننشئ الويدجت مرة واحدة فقط، ونضعه مخفيًا في الواجهة.
+  late final Widget _hiddenWebView = _aiService.buildWebViewWidget();
+
   File? _selectedImage;
   bool _isAnalyzing = false;
 
@@ -34,7 +37,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// عند الضغط على الصورة المعروضة، نفتح خيار اختيار المصدر.
   Future<void> _changeImage() async {
     showModalBottomSheet(
       context: context,
@@ -70,7 +72,6 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isAnalyzing = true);
 
     try {
-      await _aiService.buildWebView();
       final result = await _aiService.analyzeImage(_selectedImage!);
 
       if (!mounted) return;
@@ -102,71 +103,90 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.green.shade700,
         foregroundColor: Colors.white,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            // ✅ استخدام الويدجت الجديد هنا
-            Expanded(
-              child: ImagePreviewCard(
-                image: _selectedImage,
-                onTap: _changeImage,
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            Row(
+      body: Stack(
+        children: [
+          // الواجهة الرئيسية
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
               children: [
                 Expanded(
-                  child: _buildButton(
-                    icon: Icons.camera_alt,
-                    label: 'الكاميرا',
-                    color: Colors.blue,
-                    onTap: () => _pickImage(ImageSource.camera),
+                  child: ImagePreviewCard(
+                    image: _selectedImage,
+                    onTap: _changeImage,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildButton(
-                    icon: Icons.photo_library,
-                    label: 'المعرض',
-                    color: Colors.purple,
-                    onTap: () => _pickImage(ImageSource.gallery),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildButton(
+                        icon: Icons.camera_alt,
+                        label: 'الكاميرا',
+                        color: Colors.blue,
+                        onTap: () => _pickImage(ImageSource.camera),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildButton(
+                        icon: Icons.photo_library,
+                        label: 'المعرض',
+                        color: Colors.purple,
+                        onTap: () => _pickImage(ImageSource.gallery),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 55,
+                  child: ElevatedButton.icon(
+                    onPressed:
+                        _selectedImage == null || _isAnalyzing ? null : _analyze,
+                    icon: _isAnalyzing
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.auto_awesome),
+                    label: Text(
+                      _isAnalyzing ? 'جاري التحليل...' : 'اقترح وجبة 🍲',
+                      style: const TextStyle(fontSize: 17),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade700,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+          ),
 
-            SizedBox(
-              width: double.infinity,
-              height: 55,
-              child: ElevatedButton.icon(
-                onPressed:
-                    _selectedImage == null || _isAnalyzing ? null : _analyze,
-                icon: _isAnalyzing
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.auto_awesome),
-                label: Text(
-                  _isAnalyzing ? 'جاري التحليل...' : 'اقترح وجبة 🍲',
-                  style: const TextStyle(fontSize: 17),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green.shade700,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
+          // ✅ WebView مخفي بحجم 1x1 لتنفيذ JavaScript فقط.
+          // Opacity = 0 يمنع رؤيته لكنه يبقى في الشجرة.
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Opacity(
+              opacity: 0.0,
+              child: SizedBox(
+                width: 1,
+                height: 1,
+                child: _hiddenWebView,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
