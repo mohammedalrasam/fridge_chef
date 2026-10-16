@@ -1,3 +1,4 @@
+import 'dart:async';         // ✅ الإصلاح: مطلوب لاستخدام Completer
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -5,56 +6,82 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../models/recipe_response.dart';
 
 /// خدمة مسؤولة عن الاتصال بـ Gemini عبر Puter.js داخل WebView.
-/// تعمل هذه الخدمة عن طريق تحميل صفحة HTML تحتوي على مكتبة Puter.js،
-/// ثم تمرير الصورة بصيغة base64 إليها واستقبال النتيجة.
+///
+/// مهم: يجب إدراج الويدجت الذي تعيده [buildWebViewWidget] داخل شجرة الواجهة
+/// (حتى لو كان بحجم صفر) حتى يعمل JavaScript فعليًا.
 class PuterAiService {
-  late WebViewController _controller;
-  final Completer<RecipeResponse> _completer = Completer<RecipeResponse>();
+  WebViewController? _controller;
+  Completer<RecipeResponse>? _completer;
+  bool _isPageReady = false;
 
-  /// يُنشئ WebView مخفيًا يحمّل صفحة HTML مع Puter.js.
-  /// يجب استدعاء هذه الدالة قبل [analyzeImage].
-  Future<Widget> buildWebView() async {
+  /// ينشئ ويدجت WebView يحتوي على صفحة HTML مع Puter.js.
+  /// يجب وضع هذا الويدجت داخل شجرة الواجهة (انظر home_screen).
+  Widget buildWebViewWidget() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.transparent)
       ..addJavaScriptChannel(
         'PuterBridge',
         onMessageReceived: (JavaScriptMessage message) {
-          // استقبال النتيجة من JavaScript
           final raw = message.message;
-          if (!_completer.isCompleted) {
-            _completer.complete(RecipeResponse.fromRaw(raw));
+          final completer = _completer;
+          if (completer != null && !completer.isCompleted) {
+            completer.complete(RecipeResponse.fromRaw(raw));
           }
         },
       )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            _isPageReady = true;
+          },
+        ),
+      )
       ..loadHtmlString(_buildHtmlPage());
 
-    // WebView مخفي لأنه لا يُعرض للمستخدم
-    return const SizedBox.shrink();
+    return WebViewWidget(controller: _controller!);
   }
 
-  /// يحلل الصورة ويعيد الوجبة المقترحة.
-  /// [imageFile] هي الصورة الملتقطة من الكاميرا.
+  /// يحلل الصورة ويعيد الوصفة المقترحة.
   Future<RecipeResponse> analyzeImage(File imageFile) async {
+    if (_controller == null) {
+      throw Exception('لم يتم تهيئة WebView بعد.');
+    }
+
+    // انتظار قصير حتى تكتمل تهيئة الصفحة ومكتبة Puter.js.
+    // (يمكن تحسينها لاحقًا بربط onPageFinished مع Completer).
+    int waited = 0;
+    while (!_isPageReady && waited < 30) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      waited++;
+    }
+    // مهلة إضافية بسيطة لتحميل puter.js من CDN.
+    await Future.delayed(const Duration(milliseconds: 800));
+
     // قراءة الصورة وتحويلها إلى base64
     final bytes = await imageFile.readAsBytes();
     final base64Image = base64Encode(bytes);
 
-    // إرسال الصورة إلى JavaScript عبر القناة
-    await _controller.runJavaScript('''
-      window.analyzeFoodImage("$base64Image");
-    ''');
+    // إنشاء Completer جديد لكل طلب
+    _completer = Completer<RecipeResponse>();
 
-    // انتظار النتيجة من JavaScript (مع مهلة 60 ثانية)
-    return _completer.future.timeout(
+    // إرسال الصورة إلى JavaScript
+    await _controller!.runJavaScript(
+      'window.analyzeFoodImage("$base64Image");',
+    );
+
+    // انتظار النتيجة (مهلة 60 ثانية)
+    return _completer!.future.timeout(
       const Duration(seconds: 60),
       onTimeout: () {
-        throw Exception('انتهت مهلة الاتصال بالذكاء الاصطناعي. حاول مرة أخرى.');
+        throw Exception(
+          'انتهت مهلة الاتصال بالذكاء الاصطناعي. تحقق من الإنترنت وحاول مجددًا.',
+        );
       },
     );
   }
 
   /// يبني صفحة HTML التي تستدعي Puter.js.
-  /// يحتوي على دالة JavaScript باسم analyzeFoodImage تستقبل الصورة base64.
   String _buildHtmlPage() {
     return '''
 <!DOCTYPE html>
@@ -65,35 +92,43 @@ class PuterAiService {
 </head>
 <body>
   <script>
-    // دالة تُستدعى من فلاتر مع الصورة base64
     window.analyzeFoodImage = function(base64Image) {
-      // بناء data URI لتضمين نوع الصورة
-      var imageDataUri = "data:image/jpeg;base64," + base64Image;
+      try {
+        var imageDataUri = "data:image/jpeg;base64," + base64Image;
 
-      // تعليمات واضحة للنموذج لضمان استجابة منظمة
-      var prompt = `أنت خبير طهي. حلل هذه الصورة لمحتويات ثلاجة.
-      1. استخرج قائمة بجميع المكونات الغذائية الظاهرة.
-      2. اقترح وصفة كاملة باستخدام هذه المكونات.
-      أجب بالتنسيق التالي بالضبط:
-      المكونات:
-      - مكون 1
-      - مكون 2
-      الوصفة:
-      خطوات التحضير هنا...`;
+        var prompt = `أنت خبير طهي. حلل هذه الصورة لمحتويات ثلاجة.
+1. استخرج قائمة بجميع المكونات الغذائية الظاهرة.
+2. اقترح وصفة كاملة باستخدام هذه المكونات.
+أجب بالتنسيق التالي بالضبط:
+المكونات:
+- مكون 1
+- مكون 2
+الوصفة:
+خطوات التحضير هنا...`;
 
-      // استدعاء Gemini عبر Puter.js مع الصورة والتعليمات
-      puter.ai.chat(prompt, imageDataUri, {
-        model: "google/gemini-3.8-flash"
-      })
-      .then(function(response) {
-        // استخراج النص من الاستجابة
-        var text = response.message.content[0].text;
-        // إرسال النتيجة إلى فلاتر
-        PuterBridge.postMessage(text);
-      })
-      .catch(function(error) {
-        PuterBridge.postMessage("حدث خطأ: " + error.message);
-      });
+        puter.ai.chat(prompt, imageDataUri, {
+          model: "google/gemini-2.5-flash"
+        })
+        .then(function(response) {
+          var text = "";
+          if (response && response.message && response.message.content) {
+            var content = response.message.content;
+            if (Array.isArray(content)) {
+              text = content.map(function(c){ return c.text || ""; }).join("\\n");
+            } else if (typeof content === "string") {
+              text = content;
+            }
+          } else if (typeof response === "string") {
+            text = response;
+          }
+          PuterBridge.postMessage(text || "لم يتم استلام رد من النموذج.");
+        })
+        .catch(function(error) {
+          PuterBridge.postMessage("حدث خطأ: " + (error && error.message ? error.message : error));
+        });
+      } catch (e) {
+        PuterBridge.postMessage("خطأ في JavaScript: " + e.message);
+      }
     };
   </script>
 </body>
