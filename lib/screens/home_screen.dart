@@ -183,21 +183,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 // داخل Widget build، أضف هذا الزر في أي مكان:
-FloatingActionButton(
-  onPressed: () async {
-    try {
-      final res = await GeminiService().testConnection();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ الاتصال ناجح: $res')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ $e'), backgroundColor: Colors.red),
-      );
-    }
-  },
-  child: const Icon(Icons.wifi_tethering),
-),
+
   /// يبني زرًا مخصصًا للكاميرا والمعرض.
   Widget _buildButton({
     required IconData icon,
