@@ -1,10 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import '../services/puter_ai_service.dart';
+import '../services/gemini_service.dart';
 import '../widgets/image_preview_card.dart';
 import 'result_screen.dart';
 
+/// الشاشة الرئيسية: التقاط صورة أو اختيارها من المعرض، ثم تحليلها.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -14,19 +15,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final ImagePicker _picker = ImagePicker();
-  final PuterAiService _aiService = PuterAiService();
-
-  /// ننشئ الويدجت مرة واحدة فقط، ونضعه مخفيًا في الواجهة.
-  late final Widget _hiddenWebView = _aiService.buildWebViewWidget();
+  final GeminiService _aiService = GeminiService();
 
   File? _selectedImage;
   bool _isAnalyzing = false;
 
+  /// يلتقط صورة أو يختارها من المعرض.
   Future<void> _pickImage(ImageSource source) async {
     try {
       final XFile? picked = await _picker.pickImage(
         source: source,
-        imageQuality: 85,
+        imageQuality: 85, // ضغط الصورة لتسريع الإرسال
         maxWidth: 1024,
       );
       if (picked != null) {
@@ -37,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// يعرض خيارات تغيير الصورة عند الضغط عليها.
   Future<void> _changeImage() async {
     showModalBottomSheet(
       context: context,
@@ -66,6 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// يحلل الصورة عبر Gemini ويعرض النتيجة.
   Future<void> _analyze() async {
     if (_selectedImage == null) return;
 
@@ -88,9 +89,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// يعرض رسالة خطأ في SnackBar.
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 5),
+      ),
     );
   }
 
@@ -103,94 +109,96 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.green.shade700,
         foregroundColor: Colors.white,
       ),
-      body: Stack(
-        children: [
-          // الواجهة الرئيسية
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            // منطقة معاينة الصورة
+            Expanded(
+              child: ImagePreviewCard(
+                image: _selectedImage,
+                onTap: _changeImage,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // أزرار الكاميرا والمعرض
+            Row(
               children: [
                 Expanded(
-                  child: ImagePreviewCard(
-                    image: _selectedImage,
-                    onTap: _changeImage,
+                  child: _buildButton(
+                    icon: Icons.camera_alt,
+                    label: 'الكاميرا',
+                    color: Colors.blue,
+                    onTap: () => _pickImage(ImageSource.camera),
                   ),
                 ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildButton(
-                        icon: Icons.camera_alt,
-                        label: 'الكاميرا',
-                        color: Colors.blue,
-                        onTap: () => _pickImage(ImageSource.camera),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildButton(
-                        icon: Icons.photo_library,
-                        label: 'المعرض',
-                        color: Colors.purple,
-                        onTap: () => _pickImage(ImageSource.gallery),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
-                  child: ElevatedButton.icon(
-                    onPressed:
-                        _selectedImage == null || _isAnalyzing ? null : _analyze,
-                    icon: _isAnalyzing
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.auto_awesome),
-                    label: Text(
-                      _isAnalyzing ? 'جاري التحليل...' : 'اقترح وجبة 🍲',
-                      style: const TextStyle(fontSize: 17),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green.shade700,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildButton(
+                    icon: Icons.photo_library,
+                    label: 'المعرض',
+                    color: Colors.purple,
+                    onTap: () => _pickImage(ImageSource.gallery),
                   ),
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 12),
 
-          // ✅ WebView مخفي بحجم 1x1 لتنفيذ JavaScript فقط.
-          // Opacity = 0 يمنع رؤيته لكنه يبقى في الشجرة.
-          Positioned(
-            left: 0,
-            top: 0,
-            child: Opacity(
-              opacity: 0.0,
-              child: SizedBox(
-                width: 1,
-                height: 1,
-                child: _hiddenWebView,
+            // زر التحليل
+            SizedBox(
+              width: double.infinity,
+              height: 55,
+              child: ElevatedButton.icon(
+                onPressed:
+                    _selectedImage == null || _isAnalyzing ? null : _analyze,
+                icon: _isAnalyzing
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.auto_awesome),
+                label: Text(
+                  _isAnalyzing ? 'جاري التحليل...' : 'اقترح وجبة 🍲',
+                  style: const TextStyle(fontSize: 17),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade700,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
+// داخل Widget build، أضف هذا الزر في أي مكان:
+FloatingActionButton(
+  onPressed: () async {
+    try {
+      final res = await GeminiService().testConnection();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ الاتصال ناجح: $res')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ $e'), backgroundColor: Colors.red),
+      );
+    }
+  },
+  child: const Icon(Icons.wifi_tethering),
+),
+  /// يبني زرًا مخصصًا للكاميرا والمعرض.
   Widget _buildButton({
     required IconData icon,
     required String label,
